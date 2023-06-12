@@ -15,7 +15,7 @@
             schedule = schedule_data.schedule
             suffix = schedule_data.suffix
             for duty in schedule.duties:
-                wanted_events = self._filtered_unwanted_blocks(duty.schedule_events)
+                wanted_events = self._filtered_unwanted_blocks(self.original_duty_events[schedule.id][duty.id])
                 for event in self._filter_unwanted_event_types(wanted_events):
                     depot = get_depot_for_vehicle(event.vehicle_block)
                     vehicle_event = event.vehicle_event
@@ -28,8 +28,8 @@
                     row['Block_id'] = merge_with_suffix(event.vehicle_block.id, suffix)[:8]
                     row['PassingTime'] = vehicle_event.actual_start_time() * 60
                     row['TimePointID'] = self._get_stop_code(vehicle_event.get_origin_stop())
-                    row['Trip_id'] = self._get_trip_id(vehicle_event, schedule_type)
-                    row['Trip_no'] = self._get_numeric_id(vehicle_event, schedule_type)
+                    row['Trip_id'] = self._get_trip_id_for_trip_dates(schedule_type, vehicle_event)
+                    row['Trip_no'] = self._get_trip_id_for_trip_dates(schedule_type, vehicle_event)
                     row['ScheduleType'] = schedule_type
                     row['TripType'] = get_event_type(vehicle_event)
                     row['WorkID2'] = merge_with_suffix(duty.id, suffix)[:8]

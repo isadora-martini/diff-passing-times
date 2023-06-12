@@ -1,0 +1,68 @@
+    def _create_schedule_data(self):
+        table = []
+        processed_schedules = set()
+        for schedule_data in self.schedules:
+            # Skip the schedule if you already process it, it came to handle schedules with more than 1 exception date
+            if (schedule_data.schedule.service_group.id, tuple(schedule_data.days), schedule_data.is_exception_schedule,
+                    schedule_data.type) in processed_schedules:
+                continue
+            processed_schedules.add((schedule_data.schedule.service_group.id,
+                                     tuple(schedule_data.days),
+                                     schedule_data.is_exception_schedule,
+                                     schedule_data.type))
+            self.update_index_related_data(schedule_data)
+            schedule_type = schedule_data.type
+            schedule = schedule_data.schedule
+            suffix = schedule_data.suffix
+            for duty in schedule.duties:
+                wanted_events = self._filtered_unwanted_blocks(self.original_duty_events[schedule.id][duty.id])
+                for event in self._filter_unwanted_event_types(wanted_events):
+                    depot = get_depot_for_vehicle(event.vehicle_block)
+                    vehicle_event = event.vehicle_event
+                    row = dict()
+                    row['Run_id'] = merge_with_suffix(duty.id, suffix)[:8]
+                    try:
+                        row['Block_no'] = int(merge_with_suffix(int(event.vehicle_block.id) + 100000, suffix))
+                    except ValueError:
+                        row['Block_no'] = event.vehicle_block.id
+                    row['Block_id'] = merge_with_suffix(event.vehicle_block.id, suffix)[:8]
+                    row['PassingTime'] = vehicle_event.actual_start_time() * 60
+                    row['TimePointID'] = vehicle_event.get_origin_stop().id[:10]
+                    row['Trip_id'] = self._get_trip_id_for_trip_dates(schedule_type, vehicle_event)
+                    row['Trip_no'] = self._get_trip_id_for_trip_dates(schedule_type, vehicle_event)
+                    row['ScheduleType'] = schedule_type
+                    row['TripType'] = get_event_type(vehicle_event)
+                    row['WorkID2'] = merge_with_suffix(duty.id, suffix)[:8]
+                    row['GarageID'] = depot[:8]
+                    if is_event_of_type(event, ServiceTripEvent):
+                        row['Route'] = (vehicle_event.trip.route.sign[:5]).encode('utf-8')
+                        direction_name = getattr(vehicle_event.trip.route, 'direction_name', '')
+                        row[TRIP_DIRECTION] = get_direction_name(direction_name)
+                        row[TRIP_PATTERN_ID_KEY] = self.patterns.get(vehicle_event.trip.route) if self.patterns.get(
+                            vehicle_event.trip.route) else self._get_or_create_trip_pattern_id(vehicle_event.trip.route)
+                        trip = vehicle_event.trip
+                        time_points = [(time_point.id, time_point.time) for time_point in trip.time_points
+                                       if time_point.custom_properties.get('timepoint') == 1 or
+                                       time_point.only_trace_point is False]
+                        # Add first and last trip destination to the time points and remove duplicated
+                        time_points.insert(0, (event.get_origin_stop().id, trip.departure_time))
+                        time_points.append((event.get_destination_stop().id, trip.arrival_time))
+                        time_points = [g[0] for g in groupby(time_points)]
+                        for index, (tp_id, time) in enumerate(time_points):
+                            row = row.copy()
+                            row['PassingTime'] = time * 60
+                            row['TimePointID'] = tp_id
+                            table.append(row)
+                    else:
+                        # Events of type IdleTrips (including pull trips)
+                        # Add row for start point
+                        table.append(row)
+                        # Add row for end point
+                        row = row.copy()
+                        row['PassingTime'] = vehicle_event.actual_end_time() * 60
+                        row['TimePointID'] = vehicle_event.get_destination_stop().id[:10]
+                        table.append(row)
+
+        self.fix_duplicate_patterns_in_table(table)
+
+        return table, self._get_pre_message()
